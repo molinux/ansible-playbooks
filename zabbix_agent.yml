@@ -1,0 +1,101 @@
+#
+# Playbook created by: Molinero <molinuxbr@gmail.com>
+#
+# Instalacao do agente Zabbix
+# Obs:
+# 1- O código-fonte do Zabbix deve estar no control
+# 2- O zabbix_agentd.conf ja deve estar com o Server (e ServerActive) ja configurado 
+#    e o Hostname=cticXXX , além de estar salvo no control
+#
+### TAREFAS ###
+#
+# OK # Copiar fonte do Zabbix para o servidor
+# OK # Copiar script para compilar e instalar
+# OK # Compilar e instalar
+# OK # Criar usuario zabbix
+# OK # Criar diretorio /var/run/zabbix (e dar permissao ao usuario zabbix)
+# OK # Criar diretorio /var/log/zabbix
+# OK # Criar arquivo /var/log/zabbix/zabbix_agentd.log
+# OK # Copiar arquivo zabbix-agentd para /etc/zabbix/zabbix-agentd
+# OK # Alterar Server, ServerActive, PidFile, LogFile e Hostname do zabbix.conf
+# OK # (Re)start do servico
+---
+ - hosts: laboratorio
+   become: true
+   vars:
+     zabbix_version: 3.2.1
+     src_dir: "/usr/src"
+   tasks:
+   - name: Instalando os pre-requisitos
+     apt:
+       name: build-essential
+       state: present
+#       update_cache: yes
+   
+   - name: Copiando e descompatando o fonte
+     unarchive: 
+       src: "{{ src_dir }}/Zabbix/zabbix-{{ zabbix_version }}.tar.gz"
+       dest: "{{ src_dir }}"
+
+   - name: Compilando o codigo fonte
+     command: ./configure --prefix=/usr --localstatedir=/var/zabbix --sysconfdir=/etc/zabbix --enable-agent
+     args:
+       chdir: "{{ src_dir }}/zabbix-{{ zabbix_version }}"
+   
+   - name: Make Install
+     make:
+       chdir: "{{ src_dir }}/zabbix-{{ zabbix_version }}"
+       target: install
+
+   - name: Adicionar usuario zabbix
+     user: name=zabbix state=present shell=/bin/false
+
+   - name: Criando o diretorio de PID
+     file:
+       path: /var/run/zabbix
+       state: directory
+       owner: zabbix
+       group: zabbix
+
+   - name: Criando o diretorio de log
+     file:
+       path: /var/log/zabbix
+       state: directory
+       owner: zabbix
+
+   - name: Criando arquivo de log
+     file:
+       path: /var/log/zabbix/zabbix.log
+       state: touch
+       owner: zabbix
+       group: zabbix
+       mode: 0644
+
+   - name: Copiando arquivo de configuracao
+     copy:
+        src: "{{ src_dir }}/Zabbix/zabbix_agentd.conf"
+        dest: /etc/zabbix/zabbix_agentd.conf
+        backup: yes
+
+   - name: Configurando hostname
+     replace:
+        dest: /etc/zabbix/zabbix_agentd.conf
+        regexp: 'cticXXX'
+        replace: '{{ ansible_hostname }}'
+
+   - name: Copiando script de inicializacao
+     copy:
+        src: "{{ src_dir}}/Zabbix/zabbix-agentd"
+        dest: /etc/init.d/zabbix-agentd
+        mode: 0755
+
+   - name: Iniciando o servico
+     service:
+       name: zabbix-agentd
+       state: restarted
+     notify: restart zabbix
+
+   handlers:
+     - name: restart zabbix
+       service: name=zabbix-agentd state=restarted
+     
