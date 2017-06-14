@@ -1,0 +1,101 @@
+#
+# Playbook created by: Molinero <molinuxbr@gmail.com>
+#
+# Instalacao do Bacula File Daemon via codigo-fonte
+# Obs:
+# - O código-fonte do Bacula deve estar no control
+#
+### TAREFAS ###
+#
+# OK # Instalar dependencias
+# OK # Copiar fonte do Bacula para o servidor
+# OK # Compilar e instalar (nao precisa verificar versao anterior. Se quiser dar um rollback, basta mudar o bacula_version e rodar novamente)
+# OK # Suporte a SYSTEMD
+
+### TODO ###
+# Configurar o /etc/bacula/bacula-fd.conf 
+# Configurar no Director o novo cliente (arquivo de client com job ja definido)
+# Reload no bconsole para pegar as novas configuracoes
+# 
+---
+# - hosts: laboratorio
+# - hosts: databases
+ - hosts: cloud-webserver-h
+   become: true
+   vars:
+     bacula_version: 7.4.7
+     src_dir: "/usr/src"
+   tasks:
+   - name: "Instalando os pre-requisitos via APT"
+#     apt: pkg={{ item }} state=installed
+     apt: 
+       name: "{{ item }}"
+       state: present
+       update_cache: yes
+     with_items:
+       - gcc
+       - g++
+       - make
+       - libacl1-dev
+     when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+
+   - name: "Instalando os pre-requisitos via YUM"
+     yum:
+       name: "{{ item }}"
+       state: present
+#       update_cache: yes
+     with_items:
+       - gcc
+       - gcc-c++
+       - make
+     when: ansible_distribution == "CentOS" or ansible_distribution == "Red Hat Enterprise Linux"
+
+   - name: Copiando e descompactando o fonte
+     unarchive: 
+       src: "{{ src_dir }}/bacula-{{ bacula_version }}.tar.gz"
+       dest: "{{ src_dir }}"
+
+   - name: Compilando o codigo fonte
+     command: ./configure --enable-client-only --with-openssl --with-systemd
+     args:
+       chdir: "{{ src_dir }}/bacula-{{ bacula_version }}"
+
+   - name: Executando o Make
+     make:
+       chdir: "{{ src_dir }}/bacula-{{ bacula_version }}"
+
+   - name: Parar o servico do bacula-fd
+     systemd: name=bacula-fd state=stopped
+   
+   - name: Executando o Make Install
+     make:
+       chdir: "{{ src_dir }}/bacula-{{ bacula_version }}"
+       target: install
+
+   - name: Copiando script de inicializacao para o systemd
+     command: cp {{ src_dir }}/bacula-{{bacula_version}}/platforms/systemd/bacula-fd.service /lib/systemd/system/bacula-fd.service
+#        src: "{{ src_dir }}/bacula-{{ bacula_version }}/platforms/systemd/bacula-fd.service"
+#        dest: /lib/systemd/system/bacula-fd.service
+#        backup: yes
+#     notify: restart bacula-fd
+     when: ansible_service_mgr == "systemd" 
+
+   - name: Reload do systemd para carregar o bacula-fd
+     systemd:  
+       name: systemd
+       daemon_reload: yes
+
+   - name: Habilitando o bacula-fd no systemd
+     systemd:
+       name: bacula-fd
+       enabled: yes
+       masked: no
+     notify: restart bacula-fd
+
+   - name: Reiniciar o servico do bacula-fd
+     systemd: name=bacula-fd state=restarted
+   
+#   handlers:
+#     - name: restart bacula-fd
+#       systemd: name=bacula-fd state=restarted
+
