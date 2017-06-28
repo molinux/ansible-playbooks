@@ -1,5 +1,5 @@
 #
-# Playbook created by: Molinero <molinuxbr@gmail.com>
+# Playbook created by: Molinero <molinuxbr@gmail.com> | https://github.com/molinux
 #
 # Instalacao do Bacula File Daemon via codigo-fonte
 # Obs:
@@ -11,23 +11,35 @@
 # OK # Copiar fonte do Bacula para o servidor
 # OK # Compilar e instalar (nao precisa verificar versao anterior. Se quiser dar um rollback, basta mudar o bacula_version e rodar novamente)
 # OK # Suporte a SYSTEMD
+# OK # Nao executa o playbook se o bacula-fd ja for a versão atual
+# OK # Se o fonte ja estiver no target nao copia novamente
+# OK # Suporte a Debian/Ubuntu
+# OK # Suporte a RedHat/CentOS
 
 ### TODO ###
 # Configurar o /etc/bacula/bacula-fd.conf 
 # Configurar no Director o novo cliente (arquivo de client com job ja definido)
 # Reload no bconsole para pegar as novas configuracoes
+# Suporte a Slackware e outras distribuicoes
 # 
 ---
-# - hosts: laboratorio
-# - hosts: databases
- - hosts: cloud-webserver-h
+ - hosts: laboratorio
    become: true
    vars:
      bacula_version: 7.4.7
      src_dir: "/usr/src"
+   pre_tasks:
+   - name: "Verificando versao atual do Bacula"
+     command: grep -m 1 "Release [Vv]ersion" /usr/share/doc/bacula/ChangeLog 
+     register: bacula_atual
+
+   - name: "Skiping Playbook....."
+     failed_when: bacula_atual.stdout.find('7.4.7') != -1
+     fail: msg="Bacula '{{ bacula_version }}' ja esta instalado"
+     when: bacula_atual.stdout.find('7.4.7') != -1
+
    tasks:
    - name: "Instalando os pre-requisitos via APT"
-#     apt: pkg={{ item }} state=installed
      apt: 
        name: "{{ item }}"
        state: present
@@ -37,7 +49,7 @@
        - g++
        - make
        - libacl1-dev
-     when: ansible_distribution == "Debian" or ansible_distribution == "Ubuntu"
+     when: (ansible_distribution == "Debian" or ansible_distribution == "Ubuntu") and bacula_atual.stdout.find('4.7.4') == -1
 
    - name: "Instalando os pre-requisitos via YUM"
      yum:
@@ -48,36 +60,56 @@
        - gcc
        - gcc-c++
        - make
-     when: ansible_distribution == "CentOS" or ansible_distribution == "Red Hat Enterprise Linux"
+     when: (ansible_distribution == "CentOS" or ansible_distribution == "Red Hat Enterprise Linux") and bacula_atual.stdout.find('4.7.4') == -1
+
+   - name: Verificando se o fonte ja foi copiado
+     stat: 
+       path: "{{ src_dir }}/bacula-{{ bacula_version}}"
+     register: p
+
+#   - debug: var=p
 
    - name: Copiando e descompactando o fonte
      unarchive: 
        src: "{{ src_dir }}/bacula-{{ bacula_version }}.tar.gz"
        dest: "{{ src_dir }}"
+     when: p.stat.exists == false 
 
    - name: Compilando o codigo fonte
      command: ./configure --enable-client-only --with-openssl --with-systemd
      args:
        chdir: "{{ src_dir }}/bacula-{{ bacula_version }}"
+     when: bacula_atual.stdout.find('4.7.4') == -1 
 
    - name: Executando o Make
      make:
        chdir: "{{ src_dir }}/bacula-{{ bacula_version }}"
+     when: bacula_atual.stdout.find('4.7.4') == -1 
+
+   - name: Verificando se o servico bacula-fd existe
+     stat: path=/lib/systemd/system/bacula-fd.service
+     register: service_status
 
    - name: Parar o servico do bacula-fd
      systemd: name=bacula-fd state=stopped
+     when: service_status.stat.exists
+   
+   - name: Verificando se o servico bacula existe
+     stat: path=/etc/init.d/bacula
+     register: service_init_status
+
+   - name: Parar o servico do bacula
+     service: name=bacula state=stopped
+     when: service_init_status.stat.exists
    
    - name: Executando o Make Install
      make:
        chdir: "{{ src_dir }}/bacula-{{ bacula_version }}"
        target: install
+     when: bacula_atual.stdout.find('4.7.4') == -1 
 
    - name: Copiando script de inicializacao para o systemd
      command: cp {{ src_dir }}/bacula-{{bacula_version}}/platforms/systemd/bacula-fd.service /lib/systemd/system/bacula-fd.service
-#        src: "{{ src_dir }}/bacula-{{ bacula_version }}/platforms/systemd/bacula-fd.service"
-#        dest: /lib/systemd/system/bacula-fd.service
-#        backup: yes
-#     notify: restart bacula-fd
      when: ansible_service_mgr == "systemd" 
 
    - name: Reload do systemd para carregar o bacula-fd
@@ -93,9 +125,9 @@
      notify: restart bacula-fd
 
    - name: Reiniciar o servico do bacula-fd
-     systemd: name=bacula-fd state=restarted
+     systemd: name=bacula-fd.service state=restarted
    
-#   handlers:
-#     - name: restart bacula-fd
-#       systemd: name=bacula-fd state=restarted
+   handlers:
+     - name: restart bacula-fd
+       systemd: name=bacula-fd state=restarted
 
