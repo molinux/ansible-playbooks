@@ -2,7 +2,7 @@
 # Playbook created by: Molinero <molinuxbr@gmail.com>
 #
 # Instalacao do agente Zabbix
-# Obs: ATENÇÃO !!!
+# Obs:
 # 1- O código-fonte do Zabbix deve estar no control
 # 2- O zabbix_agentd.conf ja deve estar com o Server (e ServerActive) ja configurado 
 #    e o Hostname=hostXXX , além de estar salvo no control
